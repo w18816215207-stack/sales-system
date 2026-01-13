@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>销售台账与利润核算系统（印尼业务版）</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <style>
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .tab-btn.active { background-color: #3b82f6; color: white; }
+        .hidden-tab { display: none !important; }
+        .login-modal { display: flex; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999; align-items: center; justify-content: center; }
+        .login-box { background: white; padding: 30px; border-radius: 8px; width: 100%; max-width: 400px; box-shadow: 0 0 20px rgba(0,0,0,0.2); }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <!-- 登录弹窗 -->
+    <div class="login-modal" id="loginModal">
+        <div class="login-box">
+            <h2 class="text-2xl font-bold text-center mb-6 text-gray-800">系统登录</h2>
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-700 mb-1">用户名</label>
+                <input type="text" id="loginUsername" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div class="mb-6">
+                <label class="block text-sm font-medium text-gray-700 mb-1">密码</label>
+                <input type="password" id="loginPassword" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <button id="loginBtn" class="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">
+                <i class="fa-solid fa-right-to-bracket mr-1"></i>登录系统
+            </button>
+            <p id="loginError" class="text-red-500 text-sm text-center mt-3 hidden">用户名或密码错误，请重试！</p>
+        </div>
+    </div>
+
+    <div class="container mx-auto px-4 py-8 max-w-7xl hidden" id="systemContent">
+        <!-- 登录/权限切换区域 -->
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-3xl font-bold text-gray-800">销售台账与利润核算系统</h1>
+            <div class="flex items-center gap-4">
+                <span id="currentUser" class="text-sm text-gray-600"></span>
+                <select id="userRole" class="px-3 py-2 border border-gray-300 rounded-md">
+                    <option value="admin">管理员账号</option>
+                    <option value="staff">员工账号</option>
+                </select>
+                <!-- 汇率设置（仅管理员可见） -->
+                <div id="exchangeRateSection" class="flex items-center gap-2">
+                    <span class="text-sm text-gray-600">1 人民币 =</span>
+                    <input type="number" id="exchangeRate" step="0.01" min="0" value="2000" class="w-20 px-2 py-1 border border-gray-300 rounded-md">
+                    <span class="text-sm text-gray-600">印尼盾</span>
+                </div>
+                <button id="logoutBtn" class="px-3 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors">
+                    <i class="fa-solid fa-right-from-bracket mr-1"></i>退出登录
+                </button>
+            </div>
+        </div>
+
+        <!-- 标签页切换 -->
+        <div class="flex border-b border-gray-300 mb-6" id="tabContainer">
+            <button class="tab-btn px-6 py-3 font-medium rounded-t-lg transition-all" data-tab="business">
+                <i class="fa-solid fa-briefcase mr-2"></i>业务基础信息
+            </button>
+            <button class="tab-btn px-6 py-3 font-medium rounded-t-lg transition-all" data-tab="customer">
+                <i class="fa-solid fa-users mr-2"></i>客户名单管理
+            </button>
+            <button class="tab-btn px-6 py-3 font-medium rounded-t-lg transition-all active" data-tab="daily">
+                <i class="fa-solid fa-calendar-day mr-2"></i>每日销售录入
+            </button>
+            <button class="tab-btn px-6 py-3 font-medium rounded-t-lg transition-all" data-tab="profit">
+                <i class="fa-solid fa-chart-pie mr-2"></i>月度利润核算
+            </button>
+            <button class="tab-btn px-6 py-3 font-medium rounded-t-lg transition-all" data-tab="importExport">
+                <i class="fa-solid fa-file-excel mr-2"></i>数据导入导出
+            </button>
+        </div>
+
+        <!-- 1. 业务基础信息标签页（仅管理员可见） -->
+        <div class="tab-content bg-white p-6 rounded-lg shadow-md" id="business">
+            <h2 class="text-xl font-semibold mb-4 text-gray-700">业务基础信息管理</h2>
+            <div class="mb-6 p-4 border border-gray-200 rounded-lg">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">业务名称</label>
+                        <input type="text" id="businessName" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">业务固定成本(元/月)</label>
+                        <input type="number" id="fixedCost" step="0.01" min="0" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">固定渠道</label>
+                        <select id="channel" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="大羊">大羊</option>
+                            <option value="ash">ash</option>
+                            <option value="刘波">刘波</option>
+                            <option value="jenny">jenny</option>
+                            <option value="其他">其他</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">业务备注（注意事项）</label>
+                        <input type="text" id="businessRemark" placeholder="填写业务注意事项" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                </div>
+                <button id="addBusinessBtn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">
+                    <i class="fa-solid fa-plus mr-1"></i>添加业务
+                </button>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">序号</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">业务名称</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">固定成本(元/月)</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">固定渠道</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">业务备注</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="businessTableBody" class="bg-white divide-y divide-gray-200"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 2. 客户名单管理标签页 -->
+        <div class="tab-content bg-white p-6 rounded-lg shadow-md" id="customer">
+            <h2 class="text-xl font-semibold mb-4 text-gray-700">客户名单管理</h2>
+            <div class="mb-6 p-4 border border-gray-200 rounded-lg">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">客户名称</label>
+                        <input type="text" id="customerName" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">客户联系方式</label>
+                        <input type="text" id="customerContact" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">客户备注</label>
+                        <input type="text" id="customerRemark" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                </div>
+                <button id="addCustomerBtn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">
+                    <i class="fa-solid fa-plus mr-1"></i>添加客户
+                </button>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">序号</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">客户名称</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">联系方式</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">客户备注</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="customerTableBody" class="bg-white divide-y divide-gray-200"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 3. 每日销售录入标签页（员工可见核心页） -->
+        <div class="tab-content active bg-white p-6 rounded-lg shadow-md" id="daily">
+            <h2 class="text-xl font-semibold mb-4 text-gray-700">每日销售录入</h2>
+            <div class="mb-6 p-4 border border-gray-200 rounded-lg">
+                <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">选择业务</label>
+                        <select id="dailyBusiness" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="">请先添加业务</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">选择客户</label>
+                        <select id="dailyCustomer" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="">请选择客户</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">销售日期</label>
+                        <input type="date" id="saleDate" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">销售额</label>
+                        <div class="flex">
+                            <input type="number" id="saleAmount" step="0.01" min="0" class="flex-1 px-3 py-2 border border-gray-300 rounded-l-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <select id="saleCurrency" class="px-3 py-2 border border-gray-300 rounded-r-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <option value="CNY">人民币</option>
+                                <option value="IDR">印尼盾</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">变动成本(元)</label>
+                        <input type="number" id="variableCost" step="0.01" min="0" placeholder="默认无" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-1 gap-4 mb-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">销售备注</label>
+                        <input type="text" id="saleRemark" placeholder="填写销售备注信息" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                </div>
+                <button id="addDailyBtn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">
+                    <i class="fa-solid fa-plus mr-1"></i>添加销售记录
+                </button>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">序号</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">业务名称</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">客户名称</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">销售日期</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">销售额</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">变动成本(元)</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">销售备注</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="dailyTableBody" class="bg-white divide-y divide-gray-200"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 4. 月度利润核算标签页（仅管理员可见） -->
+        <div class="tab-content bg-white p-6 rounded-lg shadow-md" id="profit">
+            <h2 class="text-xl font-semibold mb-4 text-gray-700">月度利润核算</h2>
+            <div class="mb-6 flex items-center gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">选择月份</label>
+                    <input type="month" id="profitMonth" class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">选择业务</label>
+                    <select id="profitBusiness" class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="all">全部业务</option>
+                    </select>
+                </div>
+                <button id="calcProfitBtn" class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors mt-6">
+                    <i class="fa-solid fa-calculator mr-1"></i>核算利润
+                </button>
+            </div>
+            <div id="profitResult" class="p-4 border border-gray-200 rounded-lg mb-6 hidden">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                    <div class="p-3 bg-gray-50 rounded-lg">
+                        <p class="text-sm text-gray-500">月度总销售额(元)</p>
+                        <p id="totalSale" class="text-xl font-bold text-gray-800">0.00 元</p>
+                    </div>
+                    <div class="p-3 bg-gray-50 rounded-lg">
+                        <p class="text-sm text-gray-500">月度总变动成本(元)</p>
+                        <p id="totalVariableCost" class="text-xl font-bold text-gray-800">0.00 元</p>
+                    </div>
+                    <div class="p-3 bg-gray-50 rounded-lg">
+                        <p class="text-sm text-gray-500">月度固定成本(元)</p>
+                        <p id="totalFixedCost" class="text-xl font-bold text-gray-800">0.00 元</p>
+                    </div>
+                    <div class="p-3 bg-gray-50 rounded-lg">
+                        <p class="text-sm text-gray-500">月度净利润(元)</p>
+                        <p id="netProfit" class="text-xl font-bold text-green-600">0.00 元</p>
+                    </div>
+                </div>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">业务名称</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">月度销售额(元)</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">月度变动成本(元)</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">固定成本(元)</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">业务净利润(元)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="profitTableBody" class="bg-white divide-y divide-gray-200"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 5. 数据导入导出标签页（仅管理员可见） -->
+        <div class="tab-content bg-white p-6 rounded-lg shadow-md" id="importExport">
+            <h2 class="text-xl font-semibold mb-4 text-gray-700">数据导入导出</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="p-4 border border-gray-200 rounded-lg">
+                    <h3 class="text-lg font-medium mb-3 text-gray-700">数据导出</h3>
+                    <select id="exportType" class="w-full px-3 py-2 border border-gray-300 rounded-md mb-3">
+                        <option value="business">业务基础信息</option>
+                        <option value="customer">客户名单</option>
+                        <option value="daily">每日销售记录</option>
+                        <option value="profit">利润核算数据</option>
+                    </select>
+                    <button id="exportBtn" class="w-full px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors">
+                        <i class="fa-solid fa-download mr-1"></i>导出为Excel
+                    </button>
+                </div>
+                <div class="p-4 border border-gray-200 rounded-lg">
+                    <h3 class="text-lg font-medium mb-3 text-gray-700">数据导入</h3>
+                    <select id="importType" class="w-full px-3 py-2 border border-gray-300 rounded-md mb-3">
+                        <option value="business">业务基础信息</option>
+                        <option value="customer">客户名单</option>
+                        <option value="daily">每日销售记录</option>
+                    </select>
+                    <input type="file" id="importFile" accept=".xlsx,.xls" class="w-full mb-3">
+                    <button id="importBtn" class="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">
+                        <i class="fa-solid fa-upload mr-1"></i>从Excel导入
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 存储键名定义
+        const STORAGE_KEYS = {
+            business: 'sales_business_info_v2',
+            customer: 'sales_customer_info',
+            daily: 'sales_daily_records_v2',
+            exchangeRate: 'sales_exchange_rate'
+        };
+
+        // 账号配置
+        const USER_ACCOUNTS = [
+            { username: '1', password: '000000', role: 'admin' },
+            { username: '2', password: '8888', role: 'staff' }
+        ];
+
+        // 全局当前用户信息
+        let currentUser = null;
+
+        // 页面初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            // 绑定登录事件
+            bindLoginEvents();
+            // 设置默认日期
+            document.getElementById('saleDate').value = new Date().toISOString().split('T')[0];
+            document.getElementById('profitMonth').value = `${new Date().getFullYear()}-${(new Date().getMonth()+1).toString().padStart(2, '0')}`;
+        });
+
+        // ========== 登录验证相关函数 ==========
+        function bindLoginEvents() {
+            document.getElementById('loginBtn').addEventListener('click', login);
+            document.getElementById('logoutBtn').addEventListener('click', logout);
+        }
+
+        function login() {
+            const username = document.getElementById('loginUsername').value.trim();
+            const password = document.getElementById('loginPassword').value.trim();
+            const errorEl = document.getElementById('loginError');
+
+            // 验证账号密码
+            const user = USER_ACCOUNTS.find(item => item.username === username && item.password === password);
+            if (!user) {
+                errorEl.classList.remove('hidden');
+                return;
+            }
+
+            // 登录成功
+            currentUser = user;
+            errorEl.classList.add('hidden');
+            document.getElementById('loginModal').classList.add('hidden');
+            document.getElementById('systemContent').classList.remove('hidden');
+            
+            // 显示当前用户
+            document.getElementById('currentUser').textContent = `当前登录：${user.role === 'admin' ? '管理员' : '员工'}`;
+            // 设置账号角色
+            document.getElementById('userRole').value = user.role;
+            
+            // 初始化系统
+            initSystem();
+        }
+
+        function logout() {
+            currentUser = null;
+            document.getElementById('systemContent').classList.add('hidden');
+            document.getElementById('loginModal').classList.remove('hidden');
+            document.getElementById('loginUsername').value = '';
+            document.getElementById('loginPassword').value = '';
+        }
+
+        function initSystem() {
+            // 初始化标签页
+            initTabs();
+            // 加载汇率
+            loadExchangeRate();
+            // 加载所有数据
+            loadBusinessData();
+            loadCustomerData();
+            loadDailyData();
+            // 绑定事件
+            bindAllEvents();
+            // 权限控制
+            checkUserRole();
+            document.getElementById('userRole').addEventListener('change', checkUserRole);
+        }
+
+        // ========== 权限控制核心函数 ==========
+        function checkUserRole() {
+            const role = document.getElementById('userRole').value;
+            const adminTabs = ['business', 'profit', 'importExport'];
+            const tabBtns = document.querySelectorAll('.tab-btn');
+            const tabContents = document.querySelectorAll('.tab-content');
+            
+            if (role === 'staff') {
+                // 员工仅可见每日销售和客户名单页
+                tabBtns.forEach(btn => {
+                    const tab = btn.getAttribute('data-tab');
+                    if (tab !== 'daily' && tab !== 'customer') btn.classList.add('hidden-tab');
+                    else btn.classList.remove('hidden-tab');
+                });
+                tabContents.forEach(content => {
+                    const id = content.id;
+                    if (id !== 'daily' && id !== 'customer') content.classList.add('hidden-tab');
+                    else content.classList.remove('hidden-tab');
+                });
+                document.getElementById('exchangeRateSection').classList.add('hidden-tab');
+                // 员工默认选中每日销售页
+                switchTab('daily');
+            } else {
+                // 管理员可见所有页
+                tabBtns.forEach(btn => btn.classList.remove('hidden-tab'));
+                tabContents.forEach(content => content.classList.remove('hidden-tab'));
+                document.getElementById('exchangeRateSection').classList.remove('hidden-tab');
+            }
+        }
+
+        // ========== 标签页切换函数 ==========
+        function initTabs() {
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const tabId = this.getAttribute('data-tab');
+                    switchTab(tabId);
+                });
+            });
+        }
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            document.querySelector(`.tab-btn[data-tab="${tabId}"]`).classList.add('active');
+            document.getElementById(tabId).classList.add('active');
+        }
+
+        // ========== 汇率相关函数 ==========
+        function loadExchangeRate() {
+            const rate = localStorage.getItem(STORAGE_KEYS.exchangeRate) || 2000;
+            document.getElementById('exchangeRate').value = rate;
+        }
+
+        function saveExchangeRate() {
+            const rate = document.getElementById('exchangeRate').value;
+            if (rate && !isNaN(rate) && rate > 0) {
+                localStorage.setItem(STORAGE_KEYS.exchangeRate, rate);
+            }
+        }
+
+        // 货币转换：印尼盾转人民币
+        function idrToCny(amount) {
+            const rate = Number(localStorage.getItem(STORAGE_KEYS.exchangeRate) || 2000);
+            return Number(amount) / rate;
+        }
+
+        // ========== 业务基础信息相关函数 ==========
+        function loadBusinessData() {
+            const businessList = getBusinessList();
+            const tbody = document.getElementById('businessTableBody');
+            const dailyBusinessSelect = document.getElementById('dailyBusiness');
+            const profitBusinessSelect = document.getElementById('profitBusiness');
+            
+            tbody.innerHTML = '';
+            dailyBusinessSelect.innerHTML = '';
+            profitBusinessSelect.innerHTML = '<option value="all">全部业务</option>';
+
+            if (businessList.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-4 text-center text-gray-500">暂无业务信息，请添加</td></tr>';
+                dailyBusinessSelect.innerHTML = '<option value="">请先添加业务</option>';
+                return;
+            }
+
+            businessList.forEach((item, index) => {
+                // 填充业务表格
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${index + 1}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${item.name}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${Number(item.fixedCost).toFixed(2)}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${item.channel}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${item.remark || '-'}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <button onclick="deleteBusiness(${index})" class="text-red-600 hover:text-red-900">
+                            <i class="fa-solid fa-trash-can"></i> 删除
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+
+                // 填充下拉框
+                const dailyOption = document.createElement('option');
+                dailyOption.value = index;
+                dailyOption.textContent = item.name;
+                dailyBusinessSelect.appendChild(dailyOption);
+
+                const profitOption = document.createElement('option');
+                profitOption.value = index;
+                profitOption.textContent = item.name;
+                profitBusinessSelect.appendChild(profitOption);
+            });
+        }
+
+        function getBusinessList() {
+            const data = localStorage.getItem(STORAGE_KEYS.business);
+            return data ? JSON.parse(data) : [];
+        }
+
+        function addBusiness() {
+            const name = document.getElementById('businessName').value.trim();
+            const fixedCost = document.getElementById('fixedCost').value.trim();
+            const channel = document.getElementById('channel').value;
+            const remark = document.getElementById('businessRemark').value.trim();
+
+            if (!name) return alert('请输入业务名称');
+            if (!fixedCost || isNaN(fixedCost) || fixedCost < 0) return alert('请输入有效的固定成本');
+
+            const businessList = getBusinessList();
+            businessList.push({ name, fixedCost, channel, remark });
+            localStorage.setItem(STORAGE_KEYS.business, JSON.stringify(businessList));
+            loadBusinessData();
+
+            // 清空输入框
+            document.getElementById('businessName').value = '';
+            document.getElementById('fixedCost').value = '';
+            document.getElementById('businessRemark').value = '';
+            alert('业务添加成功！');
+        }
+
+        window.deleteBusiness = function(index) {
+            if (!confirm('确定删除该业务吗？关联数据也会被删除！')) return;
+            const businessList = getBusinessList();
+            businessList.splice(index, 1);
+            localStorage.setItem(STORAGE_KEYS.business, JSON.stringify(businessList));
+            // 删除关联销售记录
+            const dailyList = getDailyList().filter(item => item.businessIndex !== index);
+            localStorage.setItem(STORAGE_KEYS.daily, JSON.stringify(dailyList));
+            loadBusinessData();
+            loadDailyData();
+        }
+
+        // ========== 客户名单相关函数 ==========
+        function loadCustomerData() {
+            const customerList = getCustomerList();
+            const tbody = document.getElementById('customerTableBody');
+            const dailyCustomerSelect = document.getElementById('dailyCustomer');
+            
+            tbody.innerHTML = '';
+            dailyCustomerSelect.innerHTML = '<option value="">请选择客户</option>';
+
+            if (customerList.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="px-6 py-4 text-center text-gray-500">暂无客户信息，请添加</td></tr>';
+                return;
+            }
+
+            customerList.forEach((item, index) => {
+                // 填充客户表格
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${index + 1}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${item.name}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${item.contact || '-'}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${item.remark || '-'}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <button onclick="deleteCustomer(${index})" class="text-red-600 hover:text-red-900">
+                            <i class="fa-solid fa-trash-can"></i> 删除
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+
+                // 填充销售页客户下拉框
+                const option = document.createElement('option');
+                option.value = index;
+                option.textContent = item.name;
+                dailyCustomerSelect.appendChild(option);
+            });
+        }
+
+        function getCustomerList() {
+            const data = localStorage.getItem(STORAGE_KEYS.customer);
+            return data ? JSON.parse(data) : [];
+        }
+
+        function addCustomer() {
+            const name = document.getElementById('customerName').value.trim();
+            const contact = document.getElementById('customerContact').value.trim();
+            const remark = document.getElementById('customerRemark').value.trim();
+
+            if (!name) return alert('请输入客户名称');
+
+            const customerList = getCustomerList();
+            customerList.push({ name, contact, remark });
+            localStorage.setItem(STORAGE_KEYS.customer, JSON.stringify(customerList));
+            loadCustomerData();
+
+            document.getElementById('customerName').value = '';
+            document.getElementById('customerContact').value = '';
+            document.getElementById('customerRemark').value = '';
+            alert('客户添加成功！');
+        }
+
+        window.deleteCustomer = function(index) {
+            if (!confirm('确定删除该客户吗？')) return;
+            const customerList = getCustomerList();
+            customerList.splice(index, 1);
+            localStorage.setItem(STORAGE_KEYS.customer, JSON.stringify(customerList));
+            loadCustomerData();
+        }
+
+        // ========== 每日销售记录相关函数 ==========
+        function loadDailyData() {
+            const dailyList = getDailyList();
+            const businessList = getBusinessList();
+            const customerList = getCustomerList();
+            const tbody = document.getElementById('dailyTableBody');
+            
+            tbody.innerHTML = '';
+            if (dailyList.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" class="px-6 py-4 text-center text-gray-500">暂无销售记录，请添加</td></tr>';
+                return;
+            }
+
+            dailyList.forEach((item, index) => {
+                const business = businessList[item.businessIndex] || { name: '未知业务' };
+                const customer = customerList[item.customerIndex] || { name: '未知客户' };
+                let saleDisplay = `${Number(item.saleAmount).toFixed(2)} ${item.currency === 'CNY' ? '人民币' : '印尼盾'}`;
+                if (item.currency === 'IDR') {
+                    saleDisplay += ` (≈${idrToCny(item.saleAmount).toFixed(2)} 元)`;
+                }
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${index + 1}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${business.name}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${customer.name}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${item.date}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${saleDisplay}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${Number(item.variableCost).toFixed(2)}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${item.remark || '-'}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <button onclick="deleteDailyRecord(${index})" class="text-red-600 hover:text-red-900">
+                            <i class="fa-solid fa-trash-can"></i> 删除
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function getDailyList() {
+            const data = localStorage.getItem(STORAGE_KEYS.daily);
+            return data ? JSON.parse(data) : [];
+        }
+
+        function addDailyRecord() {
+            const businessIndex = document.getElementById('dailyBusiness').value;
+            const customerIndex = document.getElementById('dailyCustomer').value;
+            const date = document.getElementById('saleDate').value;
+            const saleAmount = document.getElementById('saleAmount').value.trim();
+            const currency = document.getElementById('saleCurrency').value;
+            const variableCost = document.getElementById('variableCost').value.trim() || 0;
+            const remark = document.getElementById('saleRemark').value.trim();
+
+            if (businessIndex === '') return alert('请选择业务');
+            if (!date) return alert('请选择销售日期');
+            if (!saleAmount || isNaN(saleAmount) || saleAmount < 0) return alert('请输入有效的销售额');
+
+            const dailyList = getDailyList();
+            dailyList.push({ businessIndex: Number(businessIndex), customerIndex: Number(customerIndex) || -1, date, saleAmount, currency, variableCost, remark });
+            localStorage.setItem(STORAGE_KEYS.daily, JSON.stringify(dailyList));
+            loadDailyData();
+
+            document.getElementById('saleAmount').value = '';
+            document.getElementById('variableCost').value = '';
+            document.getElementById('saleRemark').value = '';
+            alert('销售记录添加成功！');
+        }
+
+        window.deleteDailyRecord = function(index) {
+            if (!confirm('确定删除该销售记录吗？')) return;
+            const dailyList = getDailyList();
+            dailyList.splice(index, 1);
+            localStorage.setItem(STORAGE_KEYS.daily, JSON.stringify(dailyList));
+            loadDailyData();
+        }
+
+        // ========== 利润核算相关函数 ==========
+        function calculateProfit() {
+            const month = document.getElementById('profitMonth').value;
+            const businessIndex = document.getElementById('profitBusiness').value;
+            const businessList = getBusinessList();
+            const dailyList = getDailyList();
+
+            if (!month) return alert('请选择核算月份');
+            const filteredDaily = dailyList.filter(item => item.date.substring(0,7) === month);
+            if (filteredDaily.length === 0) return alert('该月份无销售数据！');
+
+            const targetDaily = businessIndex === 'all' ? filteredDaily : filteredDaily.filter(item => item.businessIndex === Number(businessIndex));
+            const profitByBusiness = {};
+            let totalSale = 0, totalVariableCost = 0, totalFixedCost = 0;
+
+            // 初始化利润数据
+            businessList.forEach((biz, idx) => {
+                profitByBusiness[idx] = {
+                    name: biz.name,
+                    saleAmount: 0,
+                    variableCost: 0,
+                    fixedCost: Number(biz.fixedCost),
+                    netProfit: 0
+                };
+            });
+
+            // 计算销售额和变动成本
+            targetDaily.forEach(item => {
+                const bizIdx = item.businessIndex;
+                const sale = item.currency === 'IDR' ? idrToCny(item.saleAmount) : Number(item.saleAmount);
+                const variable = Number(item.variableCost);
+
+                profitByBusiness[bizIdx].saleAmount += sale;
+                profitByBusiness[bizIdx].variableCost += variable;
+                profitByBusiness[bizIdx].netProfit = profitByBusiness[bizIdx].saleAmount - profitByBusiness[bizIdx].variableCost - profitByBusiness[bizIdx].fixedCost;
+
+                totalSale += sale;
+                totalVariableCost += variable;
+            });
+
+            // 计算总固定成本
+            if (businessIndex === 'all') {
+                const involvedBiz = [...new Set(targetDaily.map(item => item.businessIndex))];
+                involvedBiz.forEach(idx => totalFixedCost += Number(businessList[idx].fixedCost));
+            } else {
+                totalFixedCost = Number(businessList[businessIndex].fixedCost);
+            }
+
+            const netProfit = totalSale - totalVariableCost - totalFixedCost;
+
+            // 显示结果
+            document.getElementById('profitResult').classList.remove('hidden');
+            document.getElementById('totalSale').textContent = totalSale.toFixed(2) + ' 元';
+            document.getElementById('totalVariableCost').textContent = totalVariableCost.toFixed(2) + ' 元';
+            document.getElementById('totalFixedCost').textContent = totalFixedCost.toFixed(2) + ' 元';
+            document.getElementById('netProfit').textContent = netProfit.toFixed(2) + ' 元';
+            document.getElementById('netProfit').className = netProfit >=0 ? 'text-xl font-bold text-green-600' : 'text-xl font-bold text-red-600';
+
+            // 填充利润明细表格
+            const tbody = document.getElementById('profitTableBody');
+            tbody.innerHTML = '';
+            Object.values(profitByBusiness).forEach(biz => {
+                if (biz.saleAmount > 0) {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${biz.name}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${biz.saleAmount.toFixed(2)}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${biz.variableCost.toFixed(2)}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${biz.fixedCost.toFixed(2)}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm ${biz.netProfit >=0 ? 'text-green-600' : 'text-red-600'} font-medium">${biz.netProfit.toFixed(2)}</td>
+                    </tr>
+                    `;
+                    tbody.appendChild(tr);
+                }
+            });
+        }
+
+        // ========== 数据导入导出函数 ==========
+        function exportData() {
+            const type = document.getElementById('exportType').value;
+            let data = [], fileName = '';
+
+            switch(type) {
+                case 'business': data = getBusinessList(); fileName = '业务基础信息.xlsx'; break;
+                case 'customer': data = getCustomerList(); fileName = '客户名单.xlsx'; break;
+                case 'daily': 
+                    data = getDailyList().map(item => {
+                        const business = getBusinessList()[item.businessIndex] || { name: '未知' };
+                        const customer = getCustomerList()[item.customerIndex] || { name: '未知' };
+                        return {
+                            业务名称: business.name,
+                            客户名称: customer.name,
+                            销售日期: item.date,
+                            销售额: `${item.saleAmount} ${item.currency === 'CNY' ? '人民币' : '印尼盾'}`,
+                            变动成本: item.variableCost + ' 元',
+                            销售备注: item.remark
+                        };
+                    });
+                    fileName = '每日销售记录.xlsx';
+                    break;
+                case 'profit':
+                    // 需先核算利润才能导出
+                    const month = document.getElementById('profitMonth').value;
+                    if (!month) return alert('请先选择月份核算利润');
+                    calculateProfit();
+                    const profitTbody = document.getElementById('profitTableBody');
+                    data = Array.from(profitTbody.rows).map(row => ({
+                        业务名称: row.cells[0].textContent,
+                        月度销售额: row.cells[1].textContent,
+                        月度变动成本: row.cells[2].textContent,
+                        固定成本: row.cells[3].textContent,
+                        业务净利润: row.cells[4].textContent
+                    }));
+                    fileName = `月度利润核算_${month}.xlsx`;
+                    break;
+            }
+
+            const ws = XLSX.utils.json_to_sheet(data);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, '数据');
+            XLSX.writeFile(wb, fileName);
+        }
+
+        function importData() {
+            const type = document.getElementById('importType').value;
+            const file = document.getElementById('importFile').files[0];
+            if (!file) return alert('请选择Excel文件');
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const data = new Uint8Array(e.target.result);
+                const wb = XLSX.read(data, { type: 'array' });
+                const wsname = wb.SheetNames[0];
+                const ws = wb.Sheets[wsname];
+                const jsonData = XLSX.utils.sheet_to_json(ws);
+
+                if (jsonData.length === 0) return alert('文件中无数据！');
+
+                switch(type) {
+                    case 'business':
+                        localStorage.setItem(STORAGE_KEYS.business, JSON.stringify(jsonData));
+                        loadBusinessData();
+                        break;
+                    case 'customer':
+                        localStorage.setItem(STORAGE_KEYS.customer, JSON.stringify(jsonData));
+                        loadCustomerData();
+                        break;
+                    case 'daily':
+                        // 需匹配格式：业务名称、客户名称、销售日期、销售额、货币类型、变动成本、备注
+                        const businessList = getBusinessList();
+                        const customerList = getCustomerList();
+                        const dailyData = jsonData.map(item => {
+                            const businessIndex = businessList.findIndex(biz => biz.name === item.业务名称);
+                            const customerIndex = customerList.findIndex(cus => cus.name === item.客户名称);
+                            if (businessIndex === -1) throw new Error(`业务【${item.业务名称}】不存在`);
+                            return {
+                                businessIndex,
+                                customerIndex: customerIndex === -1 ? -1 : customerIndex,
+                                date: item.销售日期,
+                                saleAmount: item.销售额,
+                                currency: item.货币类型 === '印尼盾' ? 'IDR' : 'CNY',
+                                variableCost: item.变动成本 || 0,
+                                remark: item.销售备注 || ''
+                            };
+                        });
+                        localStorage.setItem(STORAGE_KEYS.daily, JSON.stringify(dailyData));
+                        loadDailyData();
+                        break;
+                }
+                alert('数据导入成功！');
+                document.getElementById('importFile').value = '';
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        // ========== 事件绑定函数 ==========
+        function bindAllEvents() {
+            // 业务相关
+            document.getElementById('addBusinessBtn').addEventListener('click', addBusiness);
+            document.getElementById('exchangeRate').addEventListener('change', saveExchangeRate);
+            // 客户相关
+            document.getElementById('addCustomerBtn').addEventListener('click', addCustomer);
+            // 销售相关
+            document.getElementById('addDailyBtn').addEventListener('click', addDailyRecord);
+            // 利润相关
+            document.getElementById('calcProfitBtn').addEventListener('click', calculateProfit);
+            // 导入导出相关
+            document.getElementById('exportBtn').addEventListener('click', exportData);
+            document.getElementById('importBtn').addEventListener('click', importData);
+        }
+    </script>
+</body>
+</html>
